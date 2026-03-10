@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "PCautivoCore": {
+      "commandName": "Project",
+      "workingDirectory": "D:\\Alex\\Trabajo\\pcautivo"
+    }
+  }
+}
