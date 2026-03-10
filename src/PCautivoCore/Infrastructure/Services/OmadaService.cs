@@ -99,6 +99,12 @@ public class OmadaService(
             _sessionCookie = cookies.GetCookies(new Uri(LoginBaseUrl))["TPOMADA_SESSIONID"]?.Value;
             _tokenExpiry  = DateTime.UtcNow.AddMinutes(90);
 
+            // Pequeña pausa para que el OC-300 propague la sesión de admin
+            // antes de recibir la petición de autorización del cliente.
+            // Sin este delay, la primera autorización tras un nuevo login de admin
+            // llega antes de que Omada haya registrado la sesión, causando rechazo.
+            await Task.Delay(600);
+
             return _adminToken;
         }
         finally
@@ -128,7 +134,7 @@ public class OmadaService(
         // Endpoint correcto confirmado desde el botón "Autorizar" del panel Omada:
         // POST /api/v2/sites/{siteId}/cmd/clients/{mac}/auth  → errorCode: 0
         // extPortal/auth siempre devolvía -1 (no es el endpoint de autorización correcto).
-        for (int attempt = 1; attempt <= 2; attempt++)
+        for (int attempt = 1; attempt <= 6; attempt++)
         {
             var adminToken = await GetAdminTokenAsync();
             if (adminToken is null) return false;
@@ -155,13 +161,14 @@ public class OmadaService(
                 var authResponse = await client.SendAsync(req);
                 var authRaw      = await authResponse.Content.ReadAsStringAsync();
 
-                // Si hay error de auth, renovar token y reintentar
+                // Si hay error HTTP de sesión expirada → renovar token y reintentar
                 if (authResponse.StatusCode is System.Net.HttpStatusCode.Unauthorized
                                             or System.Net.HttpStatusCode.Forbidden)
                 {
-                    logger.LogWarning("Omada token expirado, renovando...");
+                    logger.LogWarning("Omada token expirado (HTTP {Status}), renovando...", (int)authResponse.StatusCode);
                     _adminToken  = null;
                     _tokenExpiry = DateTime.MinValue;
+                    await Task.Delay(500);
                     continue;
                 }
 
@@ -191,7 +198,21 @@ public class OmadaService(
                     }
                 }
 
-                logger.LogWarning("Omada auth rechazo. ErrorCode: {Code}, Msg: {Msg}", result?.ErrorCode, result?.Message);
+                // Omada rechazó la petición (errorCode != 0).
+                // NO hacemos nuevo login — un login extra invalidaría la sesión activa.
+                // El OC-300 puede tomar hasta ~7s en registrar la sesión pendiente del cliente
+                // después del redirect inicial. Esperamos y reintentamos con el mismo token.
+                if (attempt < 6)
+                {
+                    logger.LogWarning(
+                        "Omada auth errorCode {Code} en intento {Attempt}/6. " +
+                        "Esperando 1.5s y reintentando con mismo token...",
+                        result?.ErrorCode, attempt);
+                    await Task.Delay(1500);
+                    continue;
+                }
+
+                logger.LogWarning("Omada auth rechazo definitivo. ErrorCode: {Code}, Msg: {Msg}", result?.ErrorCode, result?.Message);
                 return false;
             }
             catch (Exception ex)
