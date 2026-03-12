@@ -165,7 +165,7 @@ public class OmadaService(
                 if (authResponse.StatusCode is System.Net.HttpStatusCode.Unauthorized
                                             or System.Net.HttpStatusCode.Forbidden)
                 {
-                    logger.LogWarning("Omada token expirado (HTTP {Status}), renovando...", (int)authResponse.StatusCode);
+                    //logger.LogWarning("Omada token expirado (HTTP {Status}), renovando...", (int)authResponse.StatusCode);
                     _adminToken  = null;
                     _tokenExpiry = DateTime.MinValue;
                     await Task.Delay(500);
@@ -174,7 +174,7 @@ public class OmadaService(
 
                 if (!authResponse.IsSuccessStatusCode)
                 {
-                    logger.LogWarning("Omada auth HTTP error {Status}", (int)authResponse.StatusCode);
+                    //logger.LogWarning("Omada auth HTTP error {Status}", (int)authResponse.StatusCode);
                     return false;
                 }
 
@@ -188,12 +188,12 @@ public class OmadaService(
                 // Verificar si el cliente ya tiene internet activo.
                 if (result?.ErrorCode == -41010)
                 {
-                    logger.LogWarning("Omada -41010: sesión pendiente no existe para {Mac}. Verificando si ya está autorizado...", clientMac);
+                    //logger.LogWarning("Omada -41010: sesión pendiente no existe para {Mac}. Verificando si ya está autorizado...", clientMac);
                     var siteChk = !string.IsNullOrWhiteSpace(site) ? site : _settings.Site;
                     bool alreadyAuth = await IsClientAuthorizedAsync(NormMac(clientMac), siteChk, adminToken);
                     if (alreadyAuth)
                     {
-                        logger.LogInformation("Cliente {Mac} ya está autorizado en Omada. Tratando como éxito.", clientMac);
+                        //logger.LogInformation("Cliente {Mac} ya está autorizado en Omada. Tratando como éxito.", clientMac);
                         return true;
                     }
                 }
@@ -204,15 +204,15 @@ public class OmadaService(
                 // después del redirect inicial. Esperamos y reintentamos con el mismo token.
                 if (attempt < 6)
                 {
-                    logger.LogWarning(
-                        "Omada auth errorCode {Code} en intento {Attempt}/6. " +
-                        "Esperando 1.5s y reintentando con mismo token...",
-                        result?.ErrorCode, attempt);
+                    //logger.LogWarning(
+                    //    "Omada auth errorCode {Code} en intento {Attempt}/6. " +
+                    //    "Esperando 1.5s y reintentando con mismo token...",
+                    //    result?.ErrorCode, attempt);
                     await Task.Delay(1500);
                     continue;
                 }
 
-                logger.LogWarning("Omada auth rechazo definitivo. ErrorCode: {Code}, Msg: {Msg}", result?.ErrorCode, result?.Message);
+                //logger.LogWarning("Omada auth rechazo definitivo. ErrorCode: {Code}, Msg: {Msg}", result?.ErrorCode, result?.Message);
                 return false;
             }
             catch (Exception ex)

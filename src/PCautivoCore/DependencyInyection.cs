@@ -1,6 +1,7 @@
-﻿using PCautivoCore.Domain.Interfaces;
+using PCautivoCore.Domain.Interfaces;
 using PCautivoCore.Infrastructure.Persistence;
 using PCautivoCore.Infrastructure.Persistence.Repositories;
+using PCautivoCore.Infrastructure.Repositories;
 using PCautivoCore.Infrastructure.Services;
 using PCautivoCore.Infrastructure.Settings;
 using PCautivoCore.Shared.Behaviors;
@@ -41,9 +42,11 @@ public static class DependencyInyection
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRoleRepository, RoleRepository>();
         services.AddScoped<IPermissionRepository, PermissionRepository>();
-      
+
         services.AddScoped<IUserDetailRepository, UserDetailRepository>();
         services.AddScoped<IUserPropertyRepository, UserPropertyRepository>();
+
+        services.AddScoped<IDeviceSessionRepository, DeviceSessionRepository>();
 
         // Servicios de notificaciones
         services.AddSingleton<Infrastructure.Queue.AzureQueueClient>();
@@ -73,7 +76,7 @@ public static class DependencyInyection
         return services;
     }
 
-  
+
     public static IServiceCollection AddCache(this IServiceCollection services)
     {
         services.AddMemoryCache();

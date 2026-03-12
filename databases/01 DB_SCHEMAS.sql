@@ -37,6 +37,30 @@ CREATE TABLE UserDetails
 	UpdatedAt DATETIME NULL
 )
 GO
+
+-- Script para crear las tablas necesarias para el tracking de Webhooks Omada
+-- 1. Tabla Devices
+CREATE TABLE Devices (
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    MacAddress VARCHAR(50) NOT NULL UNIQUE,
+    CreatedAt DATETIME NOT NULL DEFAULT GETUTCDATE()
+);
+GO
+-- 2. Tabla DeviceSessions
+CREATE TABLE DeviceSessions (
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    DeviceId INT NOT NULL,
+    SessionType int NOT NULL, -- '1 = ENTRADA' , '2 = SALIDA'
+    EventTime DATETIME NOT NULL,
+    
+);
+GO
+-- Índices recomendados para búsquedas rápidas por MAC y Fechas
+CREATE INDEX IX_Devices_MacAddress ON Devices(MacAddress);
+CREATE INDEX IX_DeviceSessions_EventTime ON DeviceSessions(EventTime);
+CREATE INDEX IX_DeviceSessions_DeviceId ON DeviceSessions(DeviceId);
+GO
+
 -- =============================================
 -- Datos de prueba
 --   admin    -> 102030
