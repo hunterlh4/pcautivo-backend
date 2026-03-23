@@ -1,46 +1,39 @@
 using FluentValidation;
 using MediatR;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using PCautivoCore.Application.Features.CaptiveAuth.Dtos;
 using PCautivoCore.Domain.Interfaces;
 using PCautivoCore.Domain.Models;
+using PCautivoCore.Infrastructure.Settings;
 using PCautivoCore.Shared.Responses;
 using PCautivoCore.Shared.Utils;
+using System.Text;
+using System.Text.Json;
 
 namespace PCautivoCore.Application.Features.CaptiveAuth.Actions;
 
-/// <summary>
-/// Comando de autenticación para el portal cautivo (tipo: Servidor de portal externo).
-/// Valida DNI contra la BD, luego notifica a Omada vía extPortal/auth usando el token
-/// 't' que el controlador inyectó en el redirect para liberar la sesión del cliente.
-/// </summary>
 public record CaptiveLoginCommand : IRequest<Result<CaptiveLoginDto>>
 {
-    /// <summary>DNI del titular del acceso.</summary>
+    /// <summary>
+    /// DNI
+    /// MAC del cliente (ej: aa:bb:cc:dd:ee:ff).
+    /// MAC del access point.
+    /// Nombre del SSID.
+    /// ID de radio del AP: 0 = 2.4 GHz, 1 = 5 GHz.
+    /// Token de sesión (?t=...) que Omada inyecta en el redirect al portal externo.
+    /// IP del cliente (?clientIp=... del redirect URL de Omada).
+    /// ID del sitio Omada (?site=... del redirect, ej: 638eff71cbfdfc3b05c3ef36).
+    /// URL original a la que intentaba acceder el cliente antes del redirect.
+    /// </summary>
     public string Dni { get; init; } = string.Empty;
-
-    /// <summary>MAC del dispositivo cliente (ej: aa:bb:cc:dd:ee:ff).</summary>
     public string ClientMac { get; init; } = string.Empty;
-
-    /// <summary>MAC del access point.</summary>
     public string ApMac { get; init; } = string.Empty;
-
-    /// <summary>Nombre del SSID.</summary>
     public string SsidName { get; init; } = string.Empty;
-
-    /// <summary>ID de radio del AP: 0 = 2.4 GHz, 1 = 5 GHz.</summary>
     public int RadioId { get; init; } = 0;
-
-    /// <summary>Token de sesión (?t=...) que Omada inyecta en el redirect al portal externo.</summary>
     public long? T { get; init; }
-
-    /// <summary>IP del cliente (?clientIp=... del redirect URL de Omada).</summary>
     public string? ClientIp { get; init; }
-
-    /// <summary>ID del sitio Omada (?site=... del redirect, ej: 638eff71cbfdfc3b05c3ef36).</summary>
     public string? Site { get; init; }
-
-    /// <summary>URL original a la que intentaba acceder el cliente antes del redirect.</summary>
     public string? OriginUrl { get; init; }
 
     // ──────────────────────────────────────────────────────────
@@ -68,9 +61,9 @@ public record CaptiveLoginCommand : IRequest<Result<CaptiveLoginDto>>
         }
     }
 
- 
     internal sealed class Handler(
-        IUserRepository userRepository,
+        IOptions<IasSettings> iasOptions,
+        IHttpClientFactory httpClientFactory,
         IOmadaService omadaService,
         IDeviceRepository deviceRepository,
         IJwtUtil jwtUtil) : IRequestHandler<CaptiveLoginCommand, Result<CaptiveLoginDto>>
@@ -79,15 +72,17 @@ public record CaptiveLoginCommand : IRequest<Result<CaptiveLoginDto>>
             CaptiveLoginCommand request,
             CancellationToken cancellationToken)
         {
-           
-            // 1. Validar que el usuario existe por DNI (almacenado en Username)
-            var user = await userRepository.GetUserByUsername(request.Dni);
+            var normalizedMac = NormalizeMacAddress(request.ClientMac);
+            var normalizedDni = request.Dni.Trim();
 
-            if (user is null)
-                return Errors.Unauthorized("DNI no registrado.");
+            // 1. Validar que el DNI existe en el IAS
+            var iasError = await ValidateDniInIasAsync(normalizedDni, cancellationToken);
+            if (iasError is not null)
+            {
+                return iasError;
+            }
 
-            // 2. Autorizar MAC en Omada vía extPortal/auth (Servidor de portal externo)
-            //    Omada identifica la sesión pendiente por el token 't' del redirect.
+            // 2. Preguntar Omada identifica la sesión pendiente por el token 't' del redirect.
             bool omadaOk = await omadaService.AuthorizeClientAsync(
                 target:      string.Empty,
                 targetPort:  0,
@@ -101,15 +96,14 @@ public record CaptiveLoginCommand : IRequest<Result<CaptiveLoginDto>>
                 redirectUrl: request.OriginUrl);
 
             if (!omadaOk)
+            {
                 return Errors.BadRequest("No se pudo autorizar el dispositivo en el controlador WiFi. Intente nuevamente.");
-
-            var normalizedMac = NormalizeMacAddress(request.ClientMac);
-            var normalizedDni = request.Dni.Trim();
+            }
 
             var deviceId = await deviceRepository.GetDeviceByMacAsync(normalizedMac);
             if (!deviceId.HasValue || deviceId.Value == 0)
             {
-                deviceId = await deviceRepository.AddDeviceAsync(new Device
+                await deviceRepository.AddDeviceAsync(new Device
                 {
                     MacAddress = normalizedMac,
                     Dni = normalizedDni,
@@ -121,8 +115,7 @@ public record CaptiveLoginCommand : IRequest<Result<CaptiveLoginDto>>
                 await deviceRepository.UpdateDeviceDniByMacAsync(normalizedMac, normalizedDni);
             }
 
-           
-            string accessToken = jwtUtil.GenerateToken(user.Id.ToString());
+            string accessToken = jwtUtil.GenerateToken(normalizedDni);
             int expiresIn = jwtUtil.GetExpiresIn();
 
             var response = new CaptiveLoginDto
@@ -134,7 +127,6 @@ public record CaptiveLoginCommand : IRequest<Result<CaptiveLoginDto>>
                 LandingUrl  = request.OriginUrl ?? "http://connectivitycheck.gstatic.com/generate_204"
             };
 
-          
             return response;
         }
 
@@ -145,6 +137,45 @@ public record CaptiveLoginCommand : IRequest<Result<CaptiveLoginDto>>
                 .Replace(':', '-')
                 .Replace('.', '-')
                 .ToUpperInvariant();
+        }
+
+        private async Task<Error?> ValidateDniInIasAsync(string dni, CancellationToken cancellationToken)
+        {
+            var iasBaseConnection = iasOptions.Value.Connection;
+            if (string.IsNullOrWhiteSpace(iasBaseConnection))
+            {
+                return Errors.BadRequest("No esta configurada la conexion IAS.");
+            }
+
+            var iasApiUrl = $"{iasBaseConnection}AsistenciaCliente/GetListadoClienteCoincidencia";
+            var requestBody = new
+            {
+                coincidencia = dni
+            };
+
+            var jsonContent = JsonSerializer.Serialize(requestBody);
+            var httpContent = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+            var httpClient = httpClientFactory.CreateClient();
+            var httpResponse = await httpClient.PostAsync(iasApiUrl, httpContent, cancellationToken);
+
+            if (!httpResponse.IsSuccessStatusCode)
+            {
+                return Errors.BadRequest($"Error al consultar API de IAS: {httpResponse.StatusCode}");
+            }
+
+            var content = await httpResponse.Content.ReadAsStringAsync(cancellationToken);
+            var iasResponse = JsonSerializer.Deserialize<IasApiResponse>(content, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+            var dniExists = iasResponse?.Data != null && iasResponse.Data.Any();
+            if (!dniExists)
+            {
+                return Errors.Unauthorized("Usuario no encontrado");
+            }
+
+            return null;
         }
     }
 }

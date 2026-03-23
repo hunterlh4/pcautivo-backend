@@ -1,7 +1,6 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
 using PCautivoCore.Application.Features.OmadaWebhook.Dtos;
-using PCautivoCore.Domain.Enums;
 using PCautivoCore.Domain.Interfaces;
 using PCautivoCore.Domain.Models;
 using PCautivoCore.Shared.Responses;
@@ -40,18 +39,6 @@ public class ProcessWebhookCommandHandler : IRequestHandler<ProcessWebhookComman
             return Errors.BadRequest("MAC del cliente requerida.");
         }
 
-        var sessionType = payload.EventType switch
-        {
-            { } t when t.Contains("CONNECTED") || t.Contains("ONLINE") => DeviceSessionType.Entrada,
-            { } t when t.Contains("DISCONNECTED") || t.Contains("OFFLINE") => DeviceSessionType.Salida,
-            _ => (DeviceSessionType?)null
-        };
-
-        if (sessionType is null)
-        {
-            return Errors.BadRequest($"Evento no soportado: {payload.EventType}");
-        }
-
         var normalizedMac = NormalizeMacAddress(payload.ClientMac);
 
         var deviceId = await _deviceRepository.GetDeviceByMacAsync(normalizedMac);
@@ -72,15 +59,16 @@ public class ProcessWebhookCommandHandler : IRequestHandler<ProcessWebhookComman
         var session = new DeviceSession
         {
             DeviceId = deviceId.Value,
-            SessionType = sessionType.Value,
-            EventTime = eventTime
+            OmadaId = null,
+            StartTime = eventTime,
+            EndTime = null,
+            DurationSeconds = null
         };
 
         _logger.LogInformation(
-            "Webhook Omada: guardando sesión. DeviceId: {DeviceId}, Tipo: {SessionType}, EventTime: {EventTime}.",
+            "Webhook Omada: guardando sesión. DeviceId: {DeviceId}, StartTime: {StartTime}.",
             session.DeviceId,
-            session.SessionType,
-            session.EventTime);
+            session.StartTime);
 
         await _deviceSessionRepository.RegisterSessionAsync(session);
 

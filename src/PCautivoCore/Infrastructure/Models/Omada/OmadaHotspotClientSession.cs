@@ -9,7 +9,8 @@ public class OmadaHotspotClientSession
     public string ClientMac { get; set; } = string.Empty;
     public string? ClientIp { get; set; }
     public string? ClientName { get; set; }
-    public DateTime? StartTimeUtc { get; set; }
+    public DateTime? StartTime { get; set; }
+    public DateTime? EndTime { get; set; }
     public int DurationSeconds { get; set; }
     public string RawJson { get; set; } = string.Empty;
 }

@@ -1,5 +1,4 @@
 using Dapper;
-using PCautivoCore.Domain.Enums;
 using PCautivoCore.Domain.Interfaces;
 using PCautivoCore.Domain.Models;
 using PCautivoCore.Infrastructure.Persistence;
@@ -8,35 +7,6 @@ namespace PCautivoCore.Infrastructure.Repositories;
 
 public class DeviceSessionRepository(MssqlContext context) : IDeviceSessionRepository
 {
-    private sealed class SessionRow
-    {
-        public int DeviceId { get; set; }
-        public int SessionType { get; set; }
-        public string? OmadaId { get; set; }
-        public DateTime EventTime { get; set; }
-    }
-
-    public async Task<bool> ExistsSessionAsync(int deviceId, DeviceSessionType sessionType, DateTime eventTime)
-    {
-        using var connection = context.CreateDefaultConnection();
-
-        const string query = @"
-            SELECT CASE WHEN EXISTS (
-                SELECT 1
-                FROM DeviceSessions
-                WHERE DeviceId = @DeviceId
-                  AND SessionType = @SessionType
-                  AND EventTime = @EventTime
-            ) THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END;";
-
-        return await connection.QuerySingleAsync<bool>(query, new
-        {
-            DeviceId = deviceId,
-            SessionType = sessionType,
-            EventTime = eventTime
-        });
-    }
-
     public async Task<HashSet<string>> GetExistingSessionKeysAsync(IEnumerable<DeviceSession> sessions)
     {
         var items = sessions.ToList();
@@ -46,35 +16,47 @@ public class DeviceSessionRepository(MssqlContext context) : IDeviceSessionRepos
         }
 
         var deviceIds = items.Select(x => x.DeviceId).Distinct().ToArray();
-        var sessionTypes = items.Select(x => (int)x.SessionType).Distinct().ToArray();
         var sessionIds = items
             .Select(x => x.OmadaId)
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
-        if (sessionIds.Length == 0)
+        using var connection = context.CreateDefaultConnection();
+        IEnumerable<DeviceSession> rows;
+
+        if (sessionIds.Length > 0)
         {
-            return new HashSet<string>(StringComparer.Ordinal);
+            const string bySessionIdQuery = @"
+                                SELECT DeviceId, SessionId AS OmadaId, StartTime, EndTime, DurationSeconds
+                FROM DeviceSessions
+                WHERE SessionId IN @SessionIds
+                  AND DeviceId IN @DeviceIds;";
+
+            rows = await connection.QueryAsync<DeviceSession>(bySessionIdQuery, new
+            {
+                DeviceIds = deviceIds,
+                SessionIds = sessionIds
+            });
+        }
+        else
+        {
+            var startTimes = items.Select(x => x.StartTime).Distinct().ToArray();
+            const string byStartQuery = @"
+                                SELECT DeviceId, SessionId AS OmadaId, StartTime, EndTime, DurationSeconds
+                FROM DeviceSessions
+                WHERE DeviceId IN @DeviceIds
+                                    AND StartTime IN @StartTimes;";
+
+            rows = await connection.QueryAsync<DeviceSession>(byStartQuery, new
+            {
+                DeviceIds = deviceIds,
+                StartTimes = startTimes
+            });
         }
 
-        using var connection = context.CreateDefaultConnection();
-        const string query = @"
-            SELECT DeviceId, SessionType, SessionId AS OmadaId, EventTime
-            FROM DeviceSessions
-            WHERE SessionId IN @SessionIds
-              AND DeviceId IN @DeviceIds
-              AND SessionType IN @SessionTypes;";
-
-        var rows = await connection.QueryAsync<SessionRow>(query, new
-        {
-            DeviceIds = deviceIds,
-            SessionIds = sessionIds,
-            SessionTypes = sessionTypes
-        });
-
         return rows
-            .Select(x => BuildSessionKey(x.DeviceId, (DeviceSessionType)x.SessionType, x.OmadaId, x.EventTime))
+            .Select(x => BuildSessionKey(x.DeviceId, x.OmadaId, x.StartTime, x.EndTime))
             .ToHashSet(StringComparer.Ordinal);
     }
 
@@ -82,11 +64,10 @@ public class DeviceSessionRepository(MssqlContext context) : IDeviceSessionRepos
     {
         using var connection = context.CreateDefaultConnection();
 
-        // Registrar la sesión (ENTRADA o SALIDA) y retornar el Id generado
         var sessionQuery = @"
-            INSERT INTO DeviceSessions (DeviceId, SessionType, SessionId, EventTime)
+            INSERT INTO DeviceSessions (DeviceId, SessionId, StartTime, EndTime, DurationSeconds)
             OUTPUT INSERTED.Id
-            VALUES (@DeviceId, @SessionType, @OmadaId, @EventTime);
+            VALUES (@DeviceId, @OmadaId, @StartTime, @EndTime, @DurationSeconds);
         ";
 
         return await connection.QuerySingleAsync<int>(sessionQuery, session);
@@ -102,35 +83,34 @@ public class DeviceSessionRepository(MssqlContext context) : IDeviceSessionRepos
 
         using var connection = context.CreateDefaultConnection();
         const string query = @"
-            INSERT INTO DeviceSessions (DeviceId, SessionType, SessionId, EventTime)
-            SELECT @DeviceId, @SessionType, @OmadaId, @EventTime
+            INSERT INTO DeviceSessions (DeviceId, SessionId, StartTime, EndTime, DurationSeconds)
+            SELECT @DeviceId, @OmadaId, @StartTime, @EndTime, @DurationSeconds
             WHERE NOT EXISTS (
                 SELECT 1
                 FROM DeviceSessions
                 WHERE (
                     @OmadaId IS NOT NULL
                     AND DeviceId = @DeviceId
-                    AND SessionType = @SessionType
                     AND SessionId = @OmadaId
                 )
                 OR (
                     @OmadaId IS NULL
                     AND DeviceId = @DeviceId
-                    AND SessionType = @SessionType
-                    AND EventTime = @EventTime
+                    AND StartTime = @StartTime
+                    AND ISNULL(EndTime, '19000101') = ISNULL(@EndTime, '19000101')
                 )
             );";
 
         return await connection.ExecuteAsync(query, items);
     }
 
-    private static string BuildSessionKey(int deviceId, DeviceSessionType sessionType, string? omadaId, DateTime eventTime)
+    private static string BuildSessionKey(int deviceId, string? omadaId, DateTime startTime, DateTime? endTime)
     {
         if (!string.IsNullOrWhiteSpace(omadaId))
         {
-            return $"{deviceId}|{(int)sessionType}|OID:{omadaId}";
+            return $"{deviceId}|OID:{omadaId}";
         }
 
-        return $"{deviceId}|{(int)sessionType}|{eventTime.Ticks}";
+        return $"{deviceId}|{startTime.Ticks}|{endTime?.Ticks ?? 0}";
     }
 }

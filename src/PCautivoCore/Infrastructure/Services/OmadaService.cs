@@ -461,15 +461,21 @@ public class OmadaService(
                     startUtc = DateTimeOffset.FromUnixTimeMilliseconds(startMs.Value).UtcDateTime;
                 }
 
+                DateTime? endUtc = null;
+                if (endMs.HasValue)
+                {
+                    endUtc = DateTimeOffset.FromUnixTimeMilliseconds(endMs.Value).UtcDateTime;
+                }
+
                 sessions.Add(new OmadaHotspotClientSession
                 {
-                    Id = GetString(item, "id")
-                        ?? GetString(item, "sessionId")
-                        ?? GetString(item, "sessionID"),
+                    Id = GetString(item, "id"),
+                    
                     ClientMac = NormMac(mac),
                     ClientIp = GetString(item, "ip") ?? GetString(item, "clientIp"),
                     ClientName = GetString(item, "name") ?? GetString(item, "clientName") ?? GetString(item, "hostName"),
-                    StartTimeUtc = startUtc,
+                    StartTime = startUtc,
+                    EndTime = endUtc,
                     DurationSeconds = Math.Max(durationSeconds ?? 0, 0),
                     RawJson = item.GetRawText()
                 });
@@ -486,7 +492,6 @@ public class OmadaService(
 
             if (currentPage > 1000)
             {
-                logger.LogWarning("Corte de seguridad en paginación de hotspot clients (page > 1000).");
                 break;
             }
         }

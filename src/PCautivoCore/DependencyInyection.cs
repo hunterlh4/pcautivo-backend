@@ -66,6 +66,10 @@ public static class DependencyInyection
         services.Configure<OmadaSettings>(configuration.GetSection("Omada"));
         services.AddSingleton<IOmadaService, OmadaService>();
 
+        // IAS (Identity and Access Service)
+        services.Configure<IasSettings>(configuration.GetSection("IAS"));
+        services.AddHttpClient();
+
         return services;
     }
 

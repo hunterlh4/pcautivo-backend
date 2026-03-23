@@ -3,7 +3,6 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using PCautivoCore.Application.Features.Omada.Dtos;
-using PCautivoCore.Domain.Enums;
 using PCautivoCore.Domain.Interfaces;
 using PCautivoCore.Domain.Models;
 using PCautivoCore.Infrastructure.Models.Omada;
@@ -118,9 +117,10 @@ public record SyncOmadaSessionsCommand : IRequest<Result<OmadaSessionSyncDto>>
                 .Select(x => new DeviceSession
                 {
                     DeviceId = deviceMap[x.ClientMac],
-                    SessionType = x.SessionType,
                     OmadaId = x.OmadaId,
-                    EventTime = x.EventTime
+                    StartTime = x.StartTime,
+                    EndTime = x.EndTime,
+                    DurationSeconds = x.DurationSeconds,
                 })
                 .ToList();
 
@@ -148,46 +148,46 @@ public record SyncOmadaSessionsCommand : IRequest<Result<OmadaSessionSyncDto>>
             {
                 if (string.IsNullOrWhiteSpace(item.ClientMac) ||
                     string.IsNullOrWhiteSpace(item.Id) ||
-                    !item.StartTimeUtc.HasValue)
+                    !item.StartTime.HasValue)
                 {
                     continue;
                 }
 
                 var normalizedMac = NormalizeMacAddress(item.ClientMac);
                 var normalizedOmadaId = NormalizeOmadaId(item.Id);
-                var startTime = NormalizeForPersistence(item.StartTimeUtc.Value);
+                var startTime = NormalizeForPersistence(item.StartTime.Value);
+                DateTime? endTime = null;
 
-                candidates.Add(new CandidateSession(
-                    normalizedMac,
-                    normalizedOmadaId,
-                    DeviceSessionType.Entrada,
-                    startTime));
-
-                if (item.DurationSeconds <= 0)
+                if (item.EndTime.HasValue)
                 {
-                    continue;
+                    endTime = NormalizeForPersistence(item.EndTime.Value);
+                }
+                else if (item.DurationSeconds > 0)
+                {
+                    endTime = NormalizeForPersistence(item.StartTime.Value.AddSeconds(item.DurationSeconds));
                 }
 
                 candidates.Add(new CandidateSession(
                     normalizedMac,
                     normalizedOmadaId,
-                    DeviceSessionType.Salida,
-                    NormalizeForPersistence(item.StartTimeUtc.Value.AddSeconds(item.DurationSeconds))));
+                    startTime,
+                    endTime,
+                    item.DurationSeconds));
             }
 
             return candidates
-                .DistinctBy(x => BuildCandidateKey(x.ClientMac, x.SessionType, x.OmadaId, x.EventTime))
+                .DistinctBy(x => BuildCandidateKey(x.ClientMac, x.OmadaId, x.StartTime, x.EndTime))
                 .ToList();
         }
 
-        private static string BuildCandidateKey(string clientMac, DeviceSessionType sessionType, string? omadaId, DateTime eventTime)
+        private static string BuildCandidateKey(string clientMac, string? omadaId, DateTime startTimeUtc, DateTime? endTimeUtc)
         {
             if (!string.IsNullOrWhiteSpace(omadaId))
             {
-                return $"{clientMac}|{(int)sessionType}|OID:{omadaId}";
+                return $"{clientMac}|OID:{omadaId}";
             }
 
-            return $"{clientMac}|{(int)sessionType}|{eventTime.Ticks}";
+            return $"{clientMac}|{startTimeUtc.Ticks}|{endTimeUtc?.Ticks ?? 0}";
         }
 
         private static (DateTime startUtc, DateTime endUtc) BuildWindow(DateTimeOffset runAt, TimeOnly anchorTime, string timeZoneId)
@@ -269,16 +269,17 @@ public record SyncOmadaSessionsCommand : IRequest<Result<OmadaSessionSyncDto>>
         {
             if (!string.IsNullOrWhiteSpace(session.OmadaId))
             {
-                return $"{session.DeviceId}|{(int)session.SessionType}|OID:{session.OmadaId}";
+                return $"{session.DeviceId}|OID:{session.OmadaId}";
             }
 
-            return $"{session.DeviceId}|{(int)session.SessionType}|{session.EventTime.Ticks}";
+            return $"{session.DeviceId}|{session.StartTime.Ticks}|{session.EndTime?.Ticks ?? 0}";
         }
 
         private readonly record struct CandidateSession(
             string ClientMac,
             string? OmadaId,
-            DeviceSessionType SessionType,
-            DateTime EventTime);
+            DateTime StartTime,
+            DateTime? EndTime,
+            int DurationSeconds);
     }
 }
