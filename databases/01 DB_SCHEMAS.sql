@@ -13,14 +13,14 @@ USE DB_PCAUTIVO;
 GO
 
 
-CREATE TABLE Users
+/* CREATE TABLE Users
 (
 	Id INT PRIMARY KEY IDENTITY(1,1),
 	Username NVARCHAR(100) NOT NULL,
 	PasswordHash NVARCHAR(200) NOT NULL,
 	SuperUser BIT NOT NULL DEFAULT 0,
-	CreatedAt DATETIME NOT NULL,
-	UpdatedAt DATETIME NULL,
+    CreatedAt DATETIME2(7) NOT NULL,
+    UpdatedAt DATETIME2(7) NULL,
 	CONSTRAINT UC_Users_Username UNIQUE (Username)
 )
 GO
@@ -33,17 +33,18 @@ CREATE TABLE UserDetails
 	Email NVARCHAR(200) NOT NULL,
 	PhoneNumber NVARCHAR(50) NULL,
 	CountryCode  NVARCHAR(10) null,
-	CreatedAt DATETIME NOT NULL,
-	UpdatedAt DATETIME NULL
+    CreatedAt DATETIME2(7) NOT NULL,
+    UpdatedAt DATETIME2(7) NULL
 )
-GO
+GO */
 
 -- Script para crear las tablas necesarias para el tracking de Webhooks Omada
 -- 1. Tabla Devices
 CREATE TABLE Devices (
     Id INT IDENTITY(1,1) PRIMARY KEY,
     MacAddress VARCHAR(50) NOT NULL UNIQUE,
-    CreatedAt DATETIME NOT NULL DEFAULT GETUTCDATE()
+    Dni NVARCHAR(20) NULL,
+    CreatedAt DATETIME2(7) NOT NULL DEFAULT SYSUTCDATETIME()
 );
 GO
 -- 2. Tabla DeviceSessions
@@ -51,14 +52,72 @@ CREATE TABLE DeviceSessions (
     Id INT IDENTITY(1,1) PRIMARY KEY,
     DeviceId INT NOT NULL,
     SessionType int NOT NULL, -- '1 = ENTRADA' , '2 = SALIDA'
-    EventTime DATETIME NOT NULL,
-    
+    SessionId NVARCHAR(100) NULL,
+    EventTime DATETIME2(7) NOT NULL
 );
+GO
+
+/* CREATE TABLE UserDevices (
+    UserId INT NOT NULL,
+    DeviceId INT NOT NULL,
+    CreatedAt DATETIME2(7) NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT PK_UserDevices PRIMARY KEY (UserId, DeviceId),
+    CONSTRAINT FK_UserDevices_Users FOREIGN KEY (UserId) REFERENCES Users(Id),
+    CONSTRAINT FK_UserDevices_Devices FOREIGN KEY (DeviceId) REFERENCES Devices(Id)
+);
+GO */
+
+-- Migracion para bases existentes: convierte DATETIME a DATETIME2(7)
+IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Users') AND name = 'CreatedAt' AND system_type_id = 61)
+BEGIN
+    ALTER TABLE dbo.Users ALTER COLUMN CreatedAt DATETIME2(7) NOT NULL;
+END
+
+IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Users') AND name = 'UpdatedAt' AND system_type_id = 61)
+BEGIN
+    ALTER TABLE dbo.Users ALTER COLUMN UpdatedAt DATETIME2(7) NULL;
+END
+
+IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.UserDetails') AND name = 'CreatedAt' AND system_type_id = 61)
+BEGIN
+    ALTER TABLE dbo.UserDetails ALTER COLUMN CreatedAt DATETIME2(7) NOT NULL;
+END
+
+IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.UserDetails') AND name = 'UpdatedAt' AND system_type_id = 61)
+BEGIN
+    ALTER TABLE dbo.UserDetails ALTER COLUMN UpdatedAt DATETIME2(7) NULL;
+END
+
+IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Devices') AND name = 'CreatedAt' AND system_type_id = 61)
+BEGIN
+    ALTER TABLE dbo.Devices ALTER COLUMN CreatedAt DATETIME2(7) NOT NULL;
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Devices') AND name = 'Dni')
+BEGIN
+    ALTER TABLE dbo.Devices ADD Dni NVARCHAR(20) NULL;
+END
+
+IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.DeviceSessions') AND name = 'EventTime' AND system_type_id = 61)
+BEGIN
+    ALTER TABLE dbo.DeviceSessions ALTER COLUMN EventTime DATETIME2(7) NOT NULL;
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.DeviceSessions') AND name = 'SessionId')
+BEGIN
+    ALTER TABLE dbo.DeviceSessions ADD SessionId NVARCHAR(100) NULL;
+END
 GO
 -- Índices recomendados para búsquedas rápidas por MAC y Fechas
 CREATE INDEX IX_Devices_MacAddress ON Devices(MacAddress);
+CREATE INDEX IX_Devices_Dni ON Devices(Dni);
 CREATE INDEX IX_DeviceSessions_EventTime ON DeviceSessions(EventTime);
 CREATE INDEX IX_DeviceSessions_DeviceId ON DeviceSessions(DeviceId);
+CREATE INDEX IX_DeviceSessions_SessionId ON DeviceSessions(SessionId);
+CREATE UNIQUE INDEX UX_DeviceSessions_DeviceTypeSessionId
+ON DeviceSessions(DeviceId, SessionType, SessionId)
+WHERE SessionId IS NOT NULL;
+CREATE INDEX IX_UserDevices_DeviceId ON UserDevices(DeviceId);
 GO
 
 -- =============================================
@@ -70,14 +129,14 @@ GO
 
 INSERT INTO Users (Username, PasswordHash, SuperUser, CreatedAt)
 VALUES
-    ('admin',  '$2a$13$pHywiuK9AY4X/BORNdpNaeINFbvePylHLH.d6NiLEr.lUKWNEbooW', 1, GETDATE()),
-    ('cliente1', '$2a$13$pHywiuK9AY4X/BORNdpNaeINFbvePylHLH.d6NiLEr.lUKWNEbooW', 0, GETDATE()),
-    ('cliente2', '$2a$13$pHywiuK9AY4X/BORNdpNaeINFbvePylHLH.d6NiLEr.lUKWNEbooW', 0, GETDATE());
+    ('admin',  '$2a$13$pHywiuK9AY4X/BORNdpNaeINFbvePylHLH.d6NiLEr.lUKWNEbooW', 1, SYSDATETIME()),
+    ('cliente1', '$2a$13$pHywiuK9AY4X/BORNdpNaeINFbvePylHLH.d6NiLEr.lUKWNEbooW', 0, SYSDATETIME()),
+    ('cliente2', '$2a$13$pHywiuK9AY4X/BORNdpNaeINFbvePylHLH.d6NiLEr.lUKWNEbooW', 0, SYSDATETIME());
 GO
 
 INSERT INTO UserDetails (UserId, FirstName, LastName, Email, PhoneNumber, CountryCode, CreatedAt)
 VALUES
-    (1, 'Administrador', 'Sistema',  'admin@pcautivo.com',  '933054810', '+51', GETDATE()),
-    (2, 'pedro',          'pedro2',    'jperez@pcautivo.com', '933054811', '+51', GETDATE()),
-    (3, 'jose',         'jose2',    'mlopez@pcautivo.com', '933054812', '+51', GETDATE());
+    (1, 'Administrador', 'Sistema',  'admin@pcautivo.com',  '933054810', '+51', SYSDATETIME()),
+    (2, 'pedro',          'pedro2',    'jperez@pcautivo.com', '933054811', '+51', SYSDATETIME()),
+    (3, 'jose',         'jose2',    'mlopez@pcautivo.com', '933054812', '+51', SYSDATETIME());
 GO

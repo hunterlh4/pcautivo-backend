@@ -1,15 +1,14 @@
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
 using PCautivoApi.Shared.Extensions;
-using PCautivoCore.Application.Features.Omada.Actions;
-using PCautivoCore.Infrastructure.Models.Omada;
-using PCautivoCore.Shared.Responses;
+using PCautivoCore.Application.Features.OmadaWebhook.Actions;
+using PCautivoCore.Application.Features.OmadaWebhook.Dtos;
 
 namespace PCautivoApi.Controllers;
 
-[Route("api/webhooks/omada")]
+[Route("api/omadaWebhook")]
+[AllowAnonymous]
 [ApiController]
 public class OmadaWebhookController : ControllerBase
 {
@@ -24,13 +23,11 @@ public class OmadaWebhookController : ControllerBase
 
     [HttpPost("session")]
     [AllowAnonymous] // Importante: Omada no enviará un JWT, así que debe ser anónimo
-    public async Task<IActionResult> ReceiveSessionEvent([FromBody] OmadaWebhookPayload payload)
+    public async Task<IActionResult> ReceiveSessionEvent([FromBody] OmadaWebhookPayloadDto payload)
     {
-        _logger.LogWarning("=> Webhook recibido en el endpoint. EventType: {EventType}, ClientMac: {ClientMac}", payload?.EventType, payload?.ClientMac);
 
         if (payload == null || string.IsNullOrEmpty(payload.EventType))
         {
-            _logger.LogWarning("=> El payload del webhook llegó nulo o sin EventType.");
             return BadRequest();
         }
 

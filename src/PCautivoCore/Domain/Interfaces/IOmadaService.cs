@@ -1,5 +1,7 @@
 namespace PCautivoCore.Domain.Interfaces;
 
+using PCautivoCore.Infrastructure.Models.Omada;
+
 /// <summary>
 /// Contrato para la comunicación con el controlador Omada OC-300.
 /// </summary>
@@ -40,4 +42,14 @@ public interface IOmadaService
         string ssidName,
         int radioId = 0,
         string? originUrl = null);
+
+    /// <summary>
+    /// Obtiene sesiones de clientes desde el módulo hotspot de Omada para una ventana de tiempo.
+    /// </summary>
+    Task<IReadOnlyList<OmadaHotspotClientSession>> GetHotspotClientSessionsAsync(
+        string siteId,
+        long timeStartMs,
+        long timeEndMs,
+        int pageSize = 200,
+        CancellationToken cancellationToken = default);
 }

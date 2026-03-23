@@ -3,6 +3,7 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using PCautivoCore.Application.Features.CaptiveAuth.Dtos;
 using PCautivoCore.Domain.Interfaces;
+using PCautivoCore.Domain.Models;
 using PCautivoCore.Shared.Responses;
 using PCautivoCore.Shared.Utils;
 
@@ -10,16 +11,13 @@ namespace PCautivoCore.Application.Features.CaptiveAuth.Actions;
 
 /// <summary>
 /// Comando de autenticación para el portal cautivo (tipo: Servidor de portal externo).
-/// Valida credenciales contra la BD, luego notifica a Omada vía extPortal/auth usando el token
+/// Valida DNI contra la BD, luego notifica a Omada vía extPortal/auth usando el token
 /// 't' que el controlador inyectó en el redirect para liberar la sesión del cliente.
 /// </summary>
 public record CaptiveLoginCommand : IRequest<Result<CaptiveLoginDto>>
 {
-    /// <summary>Nombre de usuario.</summary>
-    public string Username { get; init; } = string.Empty;
-
-    /// <summary>Contraseña del usuario.</summary>
-    public string Password { get; init; } = string.Empty;
+    /// <summary>DNI del titular del acceso.</summary>
+    public string Dni { get; init; } = string.Empty;
 
     /// <summary>MAC del dispositivo cliente (ej: aa:bb:cc:dd:ee:ff).</summary>
     public string ClientMac { get; init; } = string.Empty;
@@ -53,11 +51,9 @@ public record CaptiveLoginCommand : IRequest<Result<CaptiveLoginDto>>
     {
         public Validator()
         {
-            RuleFor(x => x.Username)
-                .NotEmpty().WithMessage("El nombre de usuario es requerido.");
-
-            RuleFor(x => x.Password)
-                .NotEmpty().WithMessage("La contraseña es requerida.");
+            RuleFor(x => x.Dni)
+                .NotEmpty().WithMessage("El DNI es requerido.")
+                .Matches(@"^\d{8}$").WithMessage("El DNI debe tener 8 digitos.");
 
             RuleFor(x => x.ClientMac)
                 .NotEmpty().WithMessage("La MAC del cliente es requerida.")
@@ -76,31 +72,21 @@ public record CaptiveLoginCommand : IRequest<Result<CaptiveLoginDto>>
     internal sealed class Handler(
         IUserRepository userRepository,
         IOmadaService omadaService,
-        IJwtUtil jwtUtil,
-        ILogger<Handler> logger) : IRequestHandler<CaptiveLoginCommand, Result<CaptiveLoginDto>>
+        IDeviceRepository deviceRepository,
+        IJwtUtil jwtUtil) : IRequestHandler<CaptiveLoginCommand, Result<CaptiveLoginDto>>
     {
         public async Task<Result<CaptiveLoginDto>> Handle(
             CaptiveLoginCommand request,
             CancellationToken cancellationToken)
         {
-            logger.LogInformation(
-                "─── CaptiveLogin REQUEST ─── User={User} ClientMac={ClientMac} ApMac={ApMac} " +
-                "SsidName={SsidName} RadioId={RadioId} T={T} ClientIp={ClientIp} Site={Site} OriginUrl={OriginUrl}",
-                request.Username, request.ClientMac, request.ApMac,
-                request.SsidName, request.RadioId, request.T, request.ClientIp, request.Site, request.OriginUrl);
-            // 1. Validar que el usuario existe
-            var user = await userRepository.GetUserByUsername(request.Username);
+           
+            // 1. Validar que el usuario existe por DNI (almacenado en Username)
+            var user = await userRepository.GetUserByUsername(request.Dni);
 
             if (user is null)
-                return Errors.Unauthorized("Usuario o contraseña incorrectos 1.");
+                return Errors.Unauthorized("DNI no registrado.");
 
-            // 2. Verificar contraseña
-            bool passwordValid = PasswordUtil.VerifyPassword(request.Password, user.PasswordHash);
-
-            if (!passwordValid)
-                return Errors.Unauthorized("Usuario o contraseña incorrectos 2.");
-
-            // 3. Autorizar MAC en Omada vía extPortal/auth (Servidor de portal externo)
+            // 2. Autorizar MAC en Omada vía extPortal/auth (Servidor de portal externo)
             //    Omada identifica la sesión pendiente por el token 't' del redirect.
             bool omadaOk = await omadaService.AuthorizeClientAsync(
                 target:      string.Empty,
@@ -117,7 +103,25 @@ public record CaptiveLoginCommand : IRequest<Result<CaptiveLoginDto>>
             if (!omadaOk)
                 return Errors.BadRequest("No se pudo autorizar el dispositivo en el controlador WiFi. Intente nuevamente.");
 
-            // 4. Generar token JWT
+            var normalizedMac = NormalizeMacAddress(request.ClientMac);
+            var normalizedDni = request.Dni.Trim();
+
+            var deviceId = await deviceRepository.GetDeviceByMacAsync(normalizedMac);
+            if (!deviceId.HasValue || deviceId.Value == 0)
+            {
+                deviceId = await deviceRepository.AddDeviceAsync(new Device
+                {
+                    MacAddress = normalizedMac,
+                    Dni = normalizedDni,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+            else
+            {
+                await deviceRepository.UpdateDeviceDniByMacAsync(normalizedMac, normalizedDni);
+            }
+
+           
             string accessToken = jwtUtil.GenerateToken(user.Id.ToString());
             int expiresIn = jwtUtil.GetExpiresIn();
 
@@ -126,15 +130,21 @@ public record CaptiveLoginCommand : IRequest<Result<CaptiveLoginDto>>
                 AccessToken = accessToken,
                 TokenType   = "Bearer",
                 ExpiresIn   = expiresIn,
-                Username    = user.Username,
-                LandingUrl  = request.OriginUrl
+                Dni         = normalizedDni,
+                LandingUrl  = request.OriginUrl ?? "http://connectivitycheck.gstatic.com/generate_204"
             };
 
-            logger.LogInformation(
-                "─── CaptiveLogin RESPONSE ─── Username={Username} ExpiresIn={ExpiresIn} LandingUrl={LandingUrl}",
-                response.Username, response.ExpiresIn, response.LandingUrl);
-
+          
             return response;
+        }
+
+        private static string NormalizeMacAddress(string macAddress)
+        {
+            return macAddress
+                .Trim()
+                .Replace(':', '-')
+                .Replace('.', '-')
+                .ToUpperInvariant();
         }
     }
 }

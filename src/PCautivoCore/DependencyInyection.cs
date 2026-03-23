@@ -45,7 +45,9 @@ public static class DependencyInyection
 
         services.AddScoped<IUserDetailRepository, UserDetailRepository>();
         services.AddScoped<IUserPropertyRepository, UserPropertyRepository>();
+        services.AddScoped<IUserDeviceRepository, UserDeviceRepository>();
 
+        services.AddScoped<IDeviceRepository, DeviceRepository>();
         services.AddScoped<IDeviceSessionRepository, DeviceSessionRepository>();
 
         // Servicios de notificaciones
@@ -56,6 +58,7 @@ public static class DependencyInyection
         services.Configure<Infrastructure.Queue.AzureQueueCredentials>(configuration.GetSection("Credentials:AzureQueue"));
         services.Configure<Infrastructure.Settings.SystemSettings>(configuration.GetSection("Settings:System"));
         services.Configure<Infrastructure.Settings.NotificationSettings>(configuration.GetSection("Settings:Notifications"));
+        services.Configure<OmadaSyncJobSettings>(configuration.GetSection("OmadaSyncJob"));
 
         services.AddRefit(configuration);
 

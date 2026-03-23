@@ -14,8 +14,8 @@ public record CaptiveLoginDto
     /// <summary>Segundos hasta expiración del token.</summary>
     public int ExpiresIn { get; init; }
 
-    /// <summary>Nombre de usuario autenticado.</summary>
-    public required string Username { get; init; }
+    /// <summary>DNI autenticado.</summary>
+    public required string Dni { get; init; }
 
     /// <summary>URL original a la que será redirigido el cliente tras la autorización.</summary>
     public string? LandingUrl { get; init; }

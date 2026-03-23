@@ -1,14 +1,14 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
+using PCautivoCore.Application.Features.OmadaWebhook.Dtos;
 using PCautivoCore.Domain.Enums;
 using PCautivoCore.Domain.Interfaces;
 using PCautivoCore.Domain.Models;
-using PCautivoCore.Infrastructure.Models.Omada;
 using PCautivoCore.Shared.Responses;
 
-namespace PCautivoCore.Application.Features.Omada.Actions;
+namespace PCautivoCore.Application.Features.OmadaWebhook.Actions;
 
-public record ProcessWebhookCommand(OmadaWebhookPayload Payload) : IRequest<Result>;
+public record ProcessWebhookCommand(OmadaWebhookPayloadDto Payload) : IRequest<Result>;
 
 public class ProcessWebhookCommandHandler : IRequestHandler<ProcessWebhookCommand, Result>
 {
@@ -33,6 +33,7 @@ public class ProcessWebhookCommandHandler : IRequestHandler<ProcessWebhookComman
         var eventTime = payload.Time.HasValue
             ? DateTimeOffset.FromUnixTimeMilliseconds(payload.Time.Value).UtcDateTime
             : DateTime.UtcNow;
+        eventTime = NormalizeForPersistence(eventTime);
 
         if (string.IsNullOrWhiteSpace(payload.ClientMac))
         {
@@ -51,13 +52,18 @@ public class ProcessWebhookCommandHandler : IRequestHandler<ProcessWebhookComman
             return Errors.BadRequest($"Evento no soportado: {payload.EventType}");
         }
 
-        var deviceId = await _deviceRepository.GetDeviceByMacAsync(payload.ClientMac);
+        var normalizedMac = NormalizeMacAddress(payload.ClientMac);
+
+        var deviceId = await _deviceRepository.GetDeviceByMacAsync(normalizedMac);
 
         if (deviceId is null || deviceId == 0)
         {
+            _logger.LogInformation("Webhook Omada: guardando nuevo dispositivo para MAC {ClientMac}.", normalizedMac);
+
             var newDevice = new Device
             {
-                MacAddress = payload.ClientMac,
+                MacAddress = normalizedMac,
+                Dni = null,
                 CreatedAt = eventTime
             };
             deviceId = await _deviceRepository.AddDeviceAsync(newDevice);
@@ -70,8 +76,35 @@ public class ProcessWebhookCommandHandler : IRequestHandler<ProcessWebhookComman
             EventTime = eventTime
         };
 
-         await _deviceSessionRepository.RegisterSessionAsync(session);
+        _logger.LogInformation(
+            "Webhook Omada: guardando sesión. DeviceId: {DeviceId}, Tipo: {SessionType}, EventTime: {EventTime}.",
+            session.DeviceId,
+            session.SessionType,
+            session.EventTime);
+
+        await _deviceSessionRepository.RegisterSessionAsync(session);
+
+        _logger.LogInformation("Webhook Omada: sesión guardada correctamente para MAC {ClientMac}.", normalizedMac);
 
         return Result.Success();
+    }
+
+    private static DateTime NormalizeForPersistence(DateTime value)
+    {
+        return value.Kind switch
+        {
+            DateTimeKind.Utc => value,
+            DateTimeKind.Local => value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value, DateTimeKind.Utc)
+        };
+    }
+
+    private static string NormalizeMacAddress(string macAddress)
+    {
+        return macAddress
+            .Trim()
+            .Replace(':', '-')
+            .Replace('.', '-')
+            .ToUpperInvariant();
     }
 }
