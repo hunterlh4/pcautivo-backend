@@ -29,11 +29,6 @@ public class ProcessWebhookCommandHandler : IRequestHandler<ProcessWebhookComman
     {
         var payload = request.Payload;
 
-        var eventTime = payload.Time.HasValue
-            ? DateTimeOffset.FromUnixTimeMilliseconds(payload.Time.Value).UtcDateTime
-            : DateTime.UtcNow;
-        eventTime = NormalizeForPersistence(eventTime);
-
         if (string.IsNullOrWhiteSpace(payload.ClientMac))
         {
             return Errors.BadRequest("MAC del cliente requerida.");
@@ -51,7 +46,7 @@ public class ProcessWebhookCommandHandler : IRequestHandler<ProcessWebhookComman
             {
                 MacAddress = normalizedMac,
                 Dni = null,
-                CreatedAt = eventTime
+                CreatedAt = DateTime.UtcNow
             };
             deviceId = await _deviceRepository.AddDeviceAsync(newDevice);
         }
@@ -60,7 +55,9 @@ public class ProcessWebhookCommandHandler : IRequestHandler<ProcessWebhookComman
         {
             DeviceId = deviceId.Value,
             OmadaId = null,
-            StartTime = eventTime,
+            StartTime = payload.Time.HasValue
+                ? NormalizeForPersistence(DateTimeOffset.FromUnixTimeMilliseconds(payload.Time.Value).UtcDateTime)
+                : DateTime.UtcNow,
             EndTime = null,
             DurationSeconds = null
         };

@@ -126,17 +126,12 @@ END
 
 IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.DeviceSessions') AND name = 'EndTimee')
 BEGIN
+
     UPDATE dbo.DeviceSessions
     SET EndTime = ISNULL(EndTime, EndTimee)
     WHERE EndTime IS NULL;
 END
 
-IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.DeviceSessions') AND name = 'EventTime')
-BEGIN
-    UPDATE dbo.DeviceSessions
-    SET StartTime = ISNULL(StartTime, EventTime)
-    WHERE StartTime IS NULL;
-END
 
 IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.DeviceSessions') AND name = 'StartTime')
 BEGIN
@@ -173,10 +168,6 @@ BEGIN
     ALTER TABLE dbo.DeviceSessions DROP COLUMN EndTimee;
 END
 
-IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.DeviceSessions') AND name = 'EventTime')
-BEGIN
-    ALTER TABLE dbo.DeviceSessions DROP COLUMN EventTime;
-END
 
 IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.DeviceSessions') AND name = 'SessionType')
 BEGIN
