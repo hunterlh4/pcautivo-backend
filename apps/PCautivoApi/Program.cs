@@ -17,6 +17,10 @@ if (!string.IsNullOrWhiteSpace(hostSetting.AllowedHosts))
 {
     configuration["AllowedHosts"] = hostSetting.AllowedHosts;
 }
+if (OperatingSystem.IsWindows())
+{
+    builder.Host.UseWindowsService();
+}
 
 builder.Services.AddInfrastructure(configuration);
 builder.Services.AddApplication();
